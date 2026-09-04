@@ -1,0 +1,14 @@
+CHALLENGESTATEMENT.md
+singhacks-jb-wealth-intelligence/
+
+# local env / secrets
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# misc
+.DS_Store
+*.db
