@@ -239,6 +239,7 @@ def diff_snapshots(client_id: str, from_date: str, to_date: str) -> dict:
             "market_value_usd_from": round(v_from, 2),
             "market_value_usd_to": round(v_to, 2),
             "change_usd": round(v_to - v_from, 2),
+            "change_pct": round(_pct(v_to - v_from, v_from), 2) if v_from else None,
             "weight_pct_from": round(_pct(v_from, aum_from), 2) if aum_from else None,
             "weight_pct_to": round(_pct(v_to, aum_to), 2) if aum_to else None,
         })

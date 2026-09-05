@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getAgentRun, getClientWorkspace } from "@/lib/api";
+import { getAgentRun, getClientWorkspace, listRecommendations } from "@/lib/api";
 import { formatUsd, formatPct, daysUntil } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentPanel } from "@/components/agent-panel";
+import { RecommendationPanel } from "@/components/recommendation-panel";
 
 function mandateBadge(status: string) {
   if (status === "breach") return <Badge variant="destructive">Breach</Badge>;
@@ -50,7 +51,7 @@ export default async function ClientWorkspacePage({
 
   const explanation = await getAgentRun(clientId, "explanation");
   const scenario = await getAgentRun(clientId, "scenario");
-  const recommendation = await getAgentRun(clientId, "recommendation");
+  const recommendations = await listRecommendations(clientId);
 
   const topTheme = lookthrough.candidate_concentration_themes[0];
 
@@ -284,12 +285,7 @@ export default async function ClientWorkspacePage({
           <TabsContent value="recommendation" keepMounted>
             <Card>
               <CardContent className="pt-6">
-                <AgentPanel
-                  clientId={clientId}
-                  agentType="recommendation"
-                  label="Recommendation"
-                  initial={recommendation}
-                />
+                <RecommendationPanel clientId={clientId} initial={recommendations} />
               </CardContent>
             </Card>
           </TabsContent>

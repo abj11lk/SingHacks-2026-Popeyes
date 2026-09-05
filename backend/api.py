@@ -19,6 +19,7 @@ Run with:  uvicorn backend.api:app --host 0.0.0.0 --port 8000 --reload
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from . import supabase_client, tools
 
@@ -89,11 +90,13 @@ def generate_agent_run(client_id: str, agent_type: str):
     roughly 30-100 seconds (a real Groq call over several tool round-trips),
     so the frontend shows a loading state, not an instant response.
     """
-    from .agents import explanation, scenario  # heavy import (langgraph/langchain-groq); kept local to this endpoint
+    # heavy import (langgraph/langchain-groq); kept local to this endpoint
+    from .agents import explanation, recommendation, scenario
 
     runners = {
         "explanation": explanation.explain,
         "scenario": scenario.analyze,
+        "recommendation": recommendation.recommend,
     }
     if agent_type not in runners:
         raise HTTPException(
@@ -107,13 +110,70 @@ def generate_agent_run(client_id: str, agent_type: str):
         raise HTTPException(status_code=404, detail=f"Unknown client_id: {client_id}")
 
     result = runners[agent_type](client_id)
-    return {
+
+    response = {
         "available": True,
         "output": {"answer": result["answer"]},
-        "model": explanation.MODEL,  # both agents share the same model constant
+        "model": explanation.MODEL,  # all three agents share the same model constant
         "created_at": None,  # the fresh run's own timestamp isn't round-tripped here; re-fetch via GET to get it
         "langsmith_trace_url": result["langsmith_trace_url"],
     }
+
+    if agent_type == "recommendation":
+        # Persist each parsed item as its own row -- this is what makes them
+        # independently accept/edit/reject-able, unlike the single-blob
+        # reports the other two agents produce.
+        response["recommendations"] = [
+            supabase_client.create_recommendation(
+                client_id=client_id,
+                agent_type="recommendation",
+                title=item["title"],
+                rationale=item["rationale"],
+                supporting_data={
+                    "tool_calls": result["tool_calls"],
+                    "langsmith_trace_url": result["langsmith_trace_url"],
+                },
+                as_of=None,
+            )
+            for item in result["recommendations"]
+        ]
+
+    return response
+
+
+@app.get("/api/clients/{client_id}/recommendations")
+def list_client_recommendations(client_id: str):
+    """
+    Every recommendation ever generated for a client, newest first --
+    each one independently accept/edit/reject-able, with its own status
+    (pending/accepted/edited/rejected). This is the audit trail; nothing
+    here is deleted when a new recommendation is generated.
+    """
+    return supabase_client.list_recommendations(client_id=client_id)
+
+
+class RecommendationActionRequest(BaseModel):
+    action: str  # "accepted" | "edited" | "rejected"
+    edited_text: str | None = None
+    note: str | None = None
+
+
+@app.post("/api/recommendations/{recommendation_id}/actions")
+def act_on_recommendation(recommendation_id: str, body: RecommendationActionRequest):
+    """
+    Records the RM's decision on a single recommendation -- the only way a
+    recommendation's status changes. There is no path where a
+    recommendation gets "applied" without this being called first.
+    """
+    try:
+        return supabase_client.record_action(
+            recommendation_id=recommendation_id,
+            action=body.action,
+            edited_text=body.edited_text,
+            note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/health")

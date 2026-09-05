@@ -1,3 +1,3 @@
-from . import explanation, scenario
+from . import explanation, recommendation, scenario
 
-__all__ = ["explanation", "scenario"]
+__all__ = ["explanation", "recommendation", "scenario"]

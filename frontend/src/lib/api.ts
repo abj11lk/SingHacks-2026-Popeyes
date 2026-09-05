@@ -128,6 +128,17 @@ export interface AgentRun {
   model?: string;
   created_at?: string;
   langsmith_trace_url?: string | null;
+  recommendations?: Recommendation[];
+}
+
+export interface Recommendation {
+  id: string;
+  client_id: string;
+  title: string;
+  rationale: string;
+  status: "pending" | "accepted" | "edited" | "rejected";
+  created_at: string;
+  updated_at: string;
 }
 
 async function getJSON<T>(path: string): Promise<T> {
@@ -162,4 +173,28 @@ export async function generateAgentRun(clientId: string, agentType: string): Pro
     throw new Error(body.detail ?? `Generate failed: HTTP ${res.status}`);
   }
   return res.json();
+}
+
+export function listRecommendations(clientId: string): Promise<Recommendation[]> {
+  return getJSON(`/api/clients/${clientId}/recommendations`);
+}
+
+export async function actOnRecommendation(
+  recommendationId: string,
+  action: "accepted" | "edited" | "rejected",
+  opts?: { editedText?: string; note?: string },
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/recommendations/${recommendationId}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action,
+      edited_text: opts?.editedText ?? null,
+      note: opts?.note ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? `Action failed: HTTP ${res.status}`);
+  }
 }

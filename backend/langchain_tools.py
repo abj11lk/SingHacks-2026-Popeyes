@@ -109,10 +109,17 @@ def _condense_snapshot(snap: dict, max_holdings: int = 10) -> dict:
     }
 
 
-def _condense_diff(diff: dict, max_movers: int = 8) -> dict:
+def _condense_diff(diff: dict, max_movers: int = 8, include_events: bool = True) -> dict:
+    """
+    include_events=False when the caller is already fetching event_log data
+    separately (both Explanation and Scenario do, in the single-shot
+    design) -- events_in_window duplicated the exact same ~15 events
+    verbatim, roughly half of this function's entire output size for no
+    added information.
+    """
     movers = diff["instrument_movers"]
     shown = movers[:max_movers]
-    return {
+    result = {
         "client_id": diff["client_id"],
         "from_date": diff["from_date"],
         "to_date": diff["to_date"],
@@ -142,19 +149,29 @@ def _condense_diff(diff: dict, max_movers: int = 8) -> dict:
             f"showing top {max_movers} of {len(movers)} movers by absolute dollar change"
             if len(movers) > max_movers else None
         ),
-        "events_in_window": [
+    }
+
+    if include_events:
+        result["events_in_window"] = [
             {"event_date": e["event_date"], "event_type": e["event_type"], "severity": e["severity"],
              "region": e["region"], "description": e["description"],
              "primary_transmission": e["primary_transmission"]}
             for e in diff["events_in_window"]
-        ],
-        "note": (
+        ]
+        result["note"] = (
             "events_in_window is the full authoritative event list for this period. Whether an "
             "event actually affected a specific holding is for you to reason about from the "
             "holding's asset_class/sector and the event's primary_transmission -- this tool no "
             "longer pre-computes that match, so do not claim it did."
-        ),
-    }
+        )
+    else:
+        result["note"] = (
+            "Event data is provided separately in this context under its own key -- cross-"
+            "reference it yourself by date and by matching primary_transmission to asset "
+            "class/sector, rather than expecting it duplicated here."
+        )
+
+    return result
 
 
 @tool
@@ -317,6 +334,17 @@ EXPLANATION_TOOLS = [get_client_snapshot, diff_snapshots, get_notes, get_events,
 # the RM's open question ("we have not modelled this"); get_market_context
 # grounds any Brent/shipping-rate claim in real numbers rather than a guess.
 SCENARIO_TOOLS = [get_client_snapshot, get_lookthrough_exposure, get_events, get_market_context, get_notes]
+
+# check_mandate_breach and get_liquidity_map are the two deterministic risk
+# panels already on the dashboard for every client -- the Recommendation
+# Agent grounds its proposals in the same numbers a human reading the
+# dashboard would see, not a separate calculation. get_market_context is
+# here because a real run cited "1 USD = 7.8 HKD" for an HKD cash-need
+# conversion with no tool call behind it (the real rate that day was 7.81)
+# -- the same unsourced-market-figure bug already fixed once for the
+# Explanation Agent, now closed here too.
+RECOMMENDATION_TOOLS = [get_client_snapshot, get_lookthrough_exposure, get_liquidity_map,
+                        check_mandate_breach, get_notes, get_market_context]
 
 # Append the snapshot-dates reminder to every tool that takes an as_of/date
 # argument, now that each is a real StructuredTool with a working .description.
