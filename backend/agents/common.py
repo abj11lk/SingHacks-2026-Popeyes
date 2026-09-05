@@ -30,8 +30,23 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tracers.context import tracing_v2_enabled
 from langchain_groq import ChatGroq
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 
 from .. import config, supabase_client
+
+
+def traced_call(name, fn, *args, **kwargs):
+    """
+    Wraps a single tools.py call as a named "tool" span in LangSmith,
+    without coupling tools.py itself to any tracing framework. Used inside
+    each agent's _gather_context() so the pre-fetch step still shows up as
+    individual, inspectable spans in the trace, nested under whichever
+    @traceable-decorated function called it (LangSmith propagates that
+    context automatically) -- even though these are plain Python calls, not
+    LLM-driven tool calls the way they were under the old ReAct design.
+    """
+    return traceable(name=name, run_type="tool")(fn)(*args, **kwargs)
 
 # get_market_context returns all 23 series if series_ids is omitted --
 # ~4,300 chars, the single largest item in every agent's context once
@@ -96,13 +111,20 @@ def run_agent(*, agent_type: str, model_name: str, system_prompt: str,
     started = time.time()
     trace_url = None
     try:
-        with tracing_v2_enabled(project_name=config.LANGSMITH_PROJECT) as cb:
+        with tracing_v2_enabled(project_name=config.LANGSMITH_PROJECT):
             response = model.invoke(
                 messages,
-                config={"run_name": f"{agent_type}-agent", "tags": [agent_type, client_id]},
+                config={"run_name": f"{agent_type}-agent-llm-call", "tags": [agent_type, client_id]},
             )
+            # Since explain()/analyze()/recommend() are themselves @traceable, this Groq
+            # call is now a child span of that run rather than its own tracing root --
+            # tracing_v2_enabled's own callback handler has no root run of its own to hand
+            # back a URL for (cb.get_run_url() raises "No traced run found" here). The
+            # current run tree (this span or an ancestor -- either resolves to the same
+            # trace) is the reliable way to get a shareable URL under nesting.
             try:
-                trace_url = cb.get_run_url()
+                run_tree = get_current_run_tree()
+                trace_url = run_tree.get_url() if run_tree else None
             except Exception as e:
                 print(f"[{agent_type}-agent] LangSmith trace URL unavailable: {e}")
     except Exception as e:

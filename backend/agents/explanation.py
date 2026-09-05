@@ -17,10 +17,13 @@ agent fabricated a plausible-sounding but wrong number: it said the
 to know that (the real figure, from market_context.csv, is 4.05%). Handing
 it the actual series removed the incentive to guess.
 """
+from langsmith import traceable
+
 from .. import db, tools
 from ..db import SNAPSHOT_DATES, TODAY
 from ..langchain_tools import _condense_diff, _condense_snapshot
 from . import common
+from .common import traced_call
 
 # Switched from openai/gpt-oss-120b after that model's 200,000-token/day
 # free-tier quota was exhausted by testing. Same model family (similar
@@ -38,15 +41,26 @@ def _client_header(client_id: str) -> str:
 
 
 def _gather_context(client_id: str, from_date: str, to_date: str) -> dict:
-    """One deterministic pass over tools.py -- zero LLM tokens spent gathering."""
+    """
+    One deterministic pass over tools.py -- zero LLM tokens spent gathering.
+    Each call is wrapped via traced_call so it still shows up as its own
+    named span in LangSmith, nested under explain()'s @traceable chain run,
+    even though nothing here is an LLM-driven tool call anymore.
+    """
     return {
-        "get_client_snapshot": _condense_snapshot(tools.get_client_snapshot(client_id, to_date)),
-        "diff_snapshots": _condense_diff(
-            tools.diff_snapshots(client_id, from_date, to_date), include_events=False
+        "get_client_snapshot": _condense_snapshot(
+            traced_call("get_client_snapshot", tools.get_client_snapshot, client_id, to_date)
         ),
-        "get_notes": tools.get_notes(client_id),
-        "get_events": tools.get_events(from_date, to_date),
-        "get_market_context": tools.get_market_context(from_date, to_date, common.DEFAULT_MARKET_SERIES),
+        "diff_snapshots": _condense_diff(
+            traced_call("diff_snapshots", tools.diff_snapshots, client_id, from_date, to_date),
+            include_events=False,
+        ),
+        "get_notes": traced_call("get_notes", tools.get_notes, client_id),
+        "get_events": traced_call("get_events", tools.get_events, from_date, to_date),
+        "get_market_context": traced_call(
+            "get_market_context", tools.get_market_context,
+            from_date, to_date, common.DEFAULT_MARKET_SERIES,
+        ),
     }
 
 
@@ -78,6 +92,7 @@ Answer in short, plain English. Write the brief itself -- do not address, name, 
 relationship manager in the third person (no "Priscilla should...", no "the RM can use this...")."""
 
 
+@traceable(run_type="chain", name="explanation-agent")
 def explain(client_id: str, question: str | None = None,
             from_date: str | None = None, to_date: str | None = None) -> dict:
     """

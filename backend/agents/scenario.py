@@ -23,10 +23,13 @@ asking it to find the situation is what actually demonstrates reasoning
 rather than scripted output, and it's what a reviewer reading this file
 sees.
 """
+from langsmith import traceable
+
 from .. import db, tools
 from ..db import SNAPSHOT_DATES, TODAY
 from ..langchain_tools import _condense_diff, _condense_snapshot
 from . import common
+from .common import traced_call
 from .explanation import MODEL
 
 
@@ -38,17 +41,31 @@ def _client_header(client_id: str) -> str:
 
 
 def _gather_context(client_id: str) -> dict:
-    """One deterministic pass over tools.py -- zero LLM tokens spent gathering."""
+    """
+    One deterministic pass over tools.py -- zero LLM tokens spent gathering.
+    Each call is wrapped via traced_call so it still shows up as its own
+    named span in LangSmith, nested under analyze()'s @traceable chain run.
+    """
     return {
-        "get_client_snapshot": _condense_snapshot(tools.get_client_snapshot(client_id, TODAY)),
-        "get_lookthrough_exposure": tools.get_lookthrough_exposure(client_id, TODAY),
+        "get_client_snapshot": _condense_snapshot(
+            traced_call("get_client_snapshot", tools.get_client_snapshot, client_id, TODAY)
+        ),
+        "get_lookthrough_exposure": traced_call(
+            "get_lookthrough_exposure", tools.get_lookthrough_exposure, client_id, TODAY
+        ),
         "diff_snapshots_baseline_to_today": _condense_diff(
-            tools.diff_snapshots(client_id, SNAPSHOT_DATES[0], TODAY),
+            traced_call(
+                "diff_snapshots_baseline_to_today", tools.diff_snapshots,
+                client_id, SNAPSHOT_DATES[0], TODAY,
+            ),
             max_movers=3, include_events=False,
         ),
-        "get_events_all": tools.get_events(),  # unfiltered -- the model identifies the relevant one
-        "get_market_context": tools.get_market_context(series_ids=common.DEFAULT_MARKET_SERIES),
-        "get_notes": tools.get_notes(client_id),
+        # unfiltered -- the model identifies the relevant one
+        "get_events_all": traced_call("get_events_all", tools.get_events),
+        "get_market_context": traced_call(
+            "get_market_context", tools.get_market_context, series_ids=common.DEFAULT_MARKET_SERIES
+        ),
+        "get_notes": traced_call("get_notes", tools.get_notes, client_id),
     }
 
 
@@ -88,6 +105,7 @@ reopening). Write the brief itself -- do not address, name, or refer to the rela
 in the third person."""
 
 
+@traceable(run_type="chain", name="scenario-agent")
 def analyze(client_id: str, question: str | None = None) -> dict:
     """
     Runs the Scenario Agent for one client and returns the answer plus a

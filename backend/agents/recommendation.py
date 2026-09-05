@@ -30,10 +30,13 @@ Scenario, no extra Groq call.
 """
 import re
 
+from langsmith import traceable
+
 from .. import db, tools
 from ..db import TODAY
 from ..langchain_tools import _condense_snapshot
 from . import common
+from .common import traced_call
 from .explanation import MODEL
 
 _HEADING_RE = re.compile(r"^###\s*Recommendation:\s*(.+)$", re.MULTILINE)
@@ -47,19 +50,32 @@ def _client_header(client_id: str) -> str:
 
 
 def _gather_context(client_id: str) -> dict:
-    """One deterministic pass over tools.py -- zero LLM tokens spent gathering."""
-    snapshot = tools.get_client_snapshot(client_id, TODAY)
-    mandate_breaches = {
-        p["portfolio_id"]: tools.check_mandate_breach(p["portfolio_id"], TODAY)
-        for p in snapshot["portfolios"]
-    }
+    """
+    One deterministic pass over tools.py -- zero LLM tokens spent gathering.
+    Each call is wrapped via traced_call so it still shows up as its own
+    named span in LangSmith, nested under recommend()'s @traceable chain run.
+    """
+    snapshot = traced_call("get_client_snapshot", tools.get_client_snapshot, client_id, TODAY)
+
+    def _all_mandate_breaches():
+        return {
+            p["portfolio_id"]: tools.check_mandate_breach(p["portfolio_id"], TODAY)
+            for p in snapshot["portfolios"]
+        }
+
+    mandate_breaches = traced_call("check_mandate_breach_by_portfolio", _all_mandate_breaches)
+
     return {
         "get_client_snapshot": _condense_snapshot(snapshot),
-        "get_lookthrough_exposure": tools.get_lookthrough_exposure(client_id, TODAY),
-        "get_liquidity_map": tools.get_liquidity_map(client_id, TODAY),
+        "get_lookthrough_exposure": traced_call(
+            "get_lookthrough_exposure", tools.get_lookthrough_exposure, client_id, TODAY
+        ),
+        "get_liquidity_map": traced_call("get_liquidity_map", tools.get_liquidity_map, client_id, TODAY),
         "check_mandate_breach_by_portfolio": mandate_breaches,
-        "get_notes": tools.get_notes(client_id),
-        "get_market_context": tools.get_market_context(series_ids=common.DEFAULT_MARKET_SERIES),
+        "get_notes": traced_call("get_notes", tools.get_notes, client_id),
+        "get_market_context": traced_call(
+            "get_market_context", tools.get_market_context, series_ids=common.DEFAULT_MARKET_SERIES
+        ),
     }
 
 
@@ -123,6 +139,7 @@ def parse_recommendations(answer: str) -> list[dict]:
     return items
 
 
+@traceable(run_type="chain", name="recommendation-agent")
 def recommend(client_id: str, question: str | None = None) -> dict:
     """
     Runs the Recommendation Agent for one client, parses discrete
