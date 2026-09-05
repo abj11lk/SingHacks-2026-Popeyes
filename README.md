@@ -5,9 +5,10 @@ SingHacks 2026 Julius Baer "Wealth Intelligence" challenge. ("North" for
 direction/guidance, "Bear" for Julius Baer.)
 
 Moves from *"what does my client's portfolio look like?"* to *"what should I know,
-and what should I do next?"* — three AI agents (Explanation, Scenario,
-Recommendation) grounded in a traceable, non-fabricating tool layer, with the RM
-staying in control of every recommendation (accept / edit / reject).
+and what should I do next?"* — four AI agents (Explanation, Scenario,
+Recommendation, Prioritisation) grounded in a traceable, non-fabricating tool
+layer, with the RM staying in control of every recommendation (accept / edit /
+reject).
 
 ---
 
@@ -44,10 +45,10 @@ docker compose up -d
 # API now running at http://localhost:8000 (check http://localhost:8000/api/health)
 
 # 4. Start the frontend
-cd frontend
+cd wealth-intelligence-merged-frontend/merged
 npm install
 npm run dev
-# Dashboard now running at http://localhost:3000
+# Dashboard now running at http://localhost:5173
 ```
 
 ### Verifying it's working
@@ -63,6 +64,11 @@ docker compose run --rm backend python check_all_clients.py
 docker compose run --rm backend python run_explanation_agent.py    # CL-0012
 docker compose run --rm backend python run_scenario_agent.py       # CL-0019
 docker compose run --rm backend python run_recommendation_agent.py # CL-0014
+
+# Prioritisation is book-wide, not per-client -- the ranking itself is free
+# (zero Groq tokens); only the narrative briefing spends real tokens
+curl http://localhost:8000/api/priorities                       # ranked book, zero-cost
+curl -X POST http://localhost:8000/api/priorities/agent-run/generate # narrative briefing
 ```
 
 ### Optional infrastructure — what happens if you don't configure it
@@ -95,13 +101,13 @@ intelligence layer that surfaces those things before the client has to ask.
 ```mermaid
 flowchart TB
     subgraph Client["Browser"]
-        UI[Next.js Dashboard]
+        UI[Vite/React Dashboard]
     end
 
     subgraph Backend["FastAPI Backend (backend/api.py)"]
         API[REST endpoints]
         Tools[backend/tools.py<br/>the engine]
-        Agents[backend/agents/<br/>explanation · scenario · recommendation]
+        Agents[backend/agents/<br/>explanation · scenario · recommendation · prioritisation]
         Common[agents/common.py<br/>shared Groq + tracing + logging harness]
     end
 
@@ -131,7 +137,7 @@ flowchart TB
 
 **Why this shape:**
 - `tools.py` is framework-agnostic, plain Python. The dashboard's static panels
-  (profile, portfolios, liquidity bar, concentration card) and all three
+  (profile, portfolios, liquidity bar, concentration card) and all four
   agents call the *exact same functions* — one bug fix applies everywhere,
   and every number an agent cites can be traced back to a real function call
   on real data.
@@ -147,7 +153,9 @@ flowchart TB
 ### 3.2 Agent execution — single-shot design
 
 Every agent follows the same two-phase pattern, implemented once in
-`agents/common.py` and reused by all three:
+`agents/common.py` and reused by all four (Prioritisation's "gather" phase
+is the deterministic ranking itself, described in §5 — the diagram below is
+the shape all four share for the Groq call and audit logging):
 
 ```mermaid
 sequenceDiagram
@@ -245,49 +253,60 @@ asserted as fact.
 | `get_events(start_date=None, end_date=None, keyword=None)` | The authoritative 2026 event log — the only source of truth for what happened in the world, never the model's own memory. |
 | `get_market_context(from_date=None, to_date=None, series_ids=None)` | Real market levels (Treasury yields, gold, Brent, FX, equity indices, VIX, CPI) with pre-computed `change` and `change_pct` — exists specifically so no agent has to guess or hand-calculate a market figure. |
 | `check_mandate_breach(portfolio_id, as_of=None)` | Does this portfolio sit outside its own mandate's allocation bands or single-position limits? Custody accounts correctly return `not_applicable`, never a fabricated breach. |
+| `get_facility_status(client_id, as_of=None)` | Credit facility LTV vs. its margin-call trigger, per facility — a real `breach` boolean, not a heuristic. |
 | `get_liquidity_map(client_id, as_of=None, horizon_days=365)` | What's actually sellable, by tier, set against known cash needs, uncalled commitments, and credit facility headroom. |
-| `get_lookthrough_exposure(client_id, as_of=None)` | Candidate concentration clusters found by matching instrument names and structured-product `underlying_reference` text — e.g. a stock, a bond, and an accumulator all referencing the same company. Explicitly labelled heuristic, not confirmed fact. |
-| `list_clients(as_of=None)` | One row per client across the whole book — AUM, risk profile, quick flags (mandate breach / LTV breach / upcoming cash need) — for the book overview and any future prioritisation view. |
+| `get_lookthrough_exposure(client_id, as_of=None)` | Candidate concentration clusters found by matching instrument names and structured-product `underlying_reference` text — e.g. a stock, a bond, and an accumulator all referencing the same company. Requires 2+ shared meaningful words (not just 1) before linking two holdings, specifically so that generic vocabulary like "bond" or "equity" can't chain unrelated instruments together. Still explicitly labelled heuristic/candidate, not confirmed fact. |
+| `list_clients(as_of=None)` | One row per client across the whole book — AUM, risk profile, quick flags (mandate breach / LTV breach / upcoming cash need) — for the book overview and the Prioritisation Agent. |
 | `run_sql(sql, params)` | Read-only escape hatch (`SELECT`/`WITH` only) for anything the named tools don't cover. |
 
 ---
 
-## 5. The three agents (`backend/agents/`)
+## 5. The four agents (`backend/agents/`)
 
-| Agent | Focal client | Capability | Output shape |
+| Agent | Scope | Capability | Output shape |
 |---|---|---|---|
-| **Explanation** (`explanation.py`) | CL-0012 (Cheung Kwok Wing) | Attributes a portfolio's change to specific events and price/flow effects, grounded in the client's actual objectives and RM notes | One markdown report, logged to `agent_runs` |
-| **Scenario** (`scenario.py`) | CL-0019 (Abdullah Al-Mansoori) | Identifies which unresolved real-world situation still materially affects a client (never told the topic — has to find it), and projects escalation vs. de-escalation | One markdown report, explicitly framed as projection vs. observed fact |
-| **Recommendation** (`recommendation.py`) | CL-0014 (Lau Chi Ming) | Proposes 1-3 concrete, individually-actionable proposals for a human to accept/edit/reject — never bundled into one block | Parsed into discrete `{title, rationale}` items via a strict `### Recommendation: <title>` heading, each persisted as its own row in Supabase's `recommendations` table |
+| **Explanation** (`explanation.py`) | Per-client (focal: CL-0012, Cheung Kwok Wing) | Attributes a portfolio's change to specific events and price/flow effects, grounded in the client's actual objectives and RM notes | One markdown report, logged to `agent_runs` |
+| **Scenario** (`scenario.py`) | Per-client (focal: CL-0019, Abdullah Al-Mansoori) | Identifies which unresolved real-world situation still materially affects a client (never told the topic — has to find it), and projects escalation vs. de-escalation | One markdown report, explicitly framed as projection vs. observed fact |
+| **Recommendation** (`recommendation.py`) | Per-client (focal: CL-0014, Lau Chi Ming) | Proposes 1-3 concrete, individually-actionable proposals for a human to accept/edit/reject — never bundled into one block | Parsed into discrete `{title, rationale}` items via a strict `### Recommendation: <title>` heading, each persisted as its own row in Supabase's `recommendations` table |
+| **Prioritisation** (`prioritisation.py`) | Book-wide, all 20 clients | Two layers, deliberately separate: a deterministic signal/score layer (real threshold checks against mandate bands, LTV, liquidity, concentration — zero Groq tokens, runs on every page load) produces the ranking; a single-shot LLM call only narrates *why*, and cannot re-rank. This is what keeps "who does she call first" defensible rather than a black box. | Ranked list (`GET /api/priorities`, free) plus an optional narrative briefing (`POST /api/priorities/agent-run/generate`, one Groq call over the top-8 flagged clients) |
 
 Deliberately *not* built as separate agents: concentration, mandate
 governance, and liquidity all appear directly on the dashboard as
 deterministic data panels (`get_lookthrough_exposure`, `check_mandate_breach`,
 `get_liquidity_map`) rather than LLM output — there's no fabrication risk in
 a number the code can already state directly, and building an agent around
-it would be extra engineering for no extra insight.
+it would be extra engineering for no extra insight. The Prioritisation
+Agent's own ranking is built the same way — deterministic first — with the
+LLM layered on top only for narrative, not for the decision itself.
 
 ---
 
-## 6. Frontend (`frontend/`)
+## 6. Frontend (`wealth-intelligence-merged-frontend/merged/`)
 
-Next.js (App Router) + Tailwind + shadcn/ui.
+Vite + React + react-router-dom, plain CSS (design tokens in `src/index.css`,
+no Tailwind/component library). Two-pane layout: a persistent dark sidebar
+(client list, search, sorted by client ID) on the left, the selected view on
+the right.
 
-- **Book overview** (`/`) — every client, sorted by AUM, with mandate/LTV/cash-need badges.
-- **Client workspace** (`/clients/[clientId]`) — the static Essentials panel (profile,
-  portfolios, notes, cash needs), the two deterministic risk panels
-  (concentration, liquidity), and an AI Intelligence section with three tabs:
-  - **Explanation** / **Scenario** — `AgentPanel` component: renders the
-    latest report if one exists, with Generate/Regenerate buttons. Nothing is
-    auto-generated on page load — a live Groq call only happens when someone
-    clicks the button, to respect the account's rate limits and keep it
-    visibly clear that this is a real run, not cached/hardcoded content.
-  - **Recommendation** — `RecommendationPanel` component: discrete cards, each
-    with its own Accept / Edit / Reject buttons, calling
-    `POST /api/recommendations/{id}/actions`. Decided recommendations lose
-    their action buttons in the UI (there's no "undo" surfaced), though
-    nothing currently stops another action being recorded via a direct API
-    call — the lock is UI-enforced, not backend-enforced.
+- **Dashboard** (`/`) — the book-wide Prioritisation view. A ranked list of
+  all 20 clients (priority badge, score, top signal, AUM) built entirely from
+  the zero-cost deterministic ranking, plus a Generate button for the
+  optional LLM triage briefing on top.
+- **Client workspace** (`/client/:clientId`) — three tabs:
+  - **Overview** — profile, portfolios, liquidity, concentration, RM notes,
+    planned cash needs. Plain data, no AI, no Groq call.
+  - **AI Insights** — Explanation / Scenario / Recommendation sub-tabs.
+    Explanation/Scenario render the latest report with a Generate/Regenerate
+    button (nothing auto-generates on page load, to respect the account's
+    rate limits). Recommendation renders discrete cards, each with its own
+    Accept / Edit / Reject buttons calling `POST /api/recommendations/{id}/actions`
+    — decided recommendations lose their action buttons in the UI (no "undo"
+    surfaced), though nothing currently stops another action being recorded
+    via a direct API call; the lock is UI-enforced, not backend-enforced.
+  - **Analytics** — four charts (recharts): asset allocation, AUM trend
+    across the five real snapshot dates, actual-vs-mandate-target per
+    portfolio, and concentration exposure — all sourced from the same
+    tool-layer data the Overview tab shows as plain numbers, just visualized.
 
 ---
 
@@ -299,7 +318,15 @@ Next.js (App Router) + Tailwind + shadcn/ui.
   as a permanent design ideal.
 - `get_lookthrough_exposure`'s clustering is keyword/name matching, not a
   confirmed security-master cross-reference — always presented as
-  "candidate," never fact.
+  "candidate," never fact. It used to link any two holdings sharing even one
+  significant word, which meant generic vocabulary ("bond", "equity",
+  "credit") chained together unrelated instruments into fabricated
+  "concentration themes" as large as 80%+ of a client's AUM. Fixed by
+  requiring 2+ shared words and stopwording generic asset-class vocabulary,
+  verified against all 20 clients — but a coincidental 2-word generic phrase
+  (e.g. "energy majors") can still, rarely, bridge two unrelated funds. Worth
+  spot-checking a client's concentration theme before presenting it, same as
+  any heuristic result in this system.
 - The price/flow decomposition in `diff_snapshots` is an approximation
   (quantity held at the earlier date, local price return applied to the
   earlier USD value), not exact — `transactions_in_window` is the
