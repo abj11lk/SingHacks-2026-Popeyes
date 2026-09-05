@@ -37,9 +37,9 @@ export default function Layout({ children }: LayoutProps) {
         <div className="app-shell">
             <aside className="sidebar">
                 <Link to="/" className="brand" style={{ color: "inherit", textDecoration: "none" }}>
-                    <div className="brand-mark">JB</div>
+                    <div className="brand-mark">NB</div>
                     <div>
-                        <div className="brand-title">Wealth Intelligence</div>
+                        <div className="brand-title">North Bear</div>
                         <div className="brand-subtitle">RM Decision Support</div>
                     </div>
                 </Link>
@@ -109,9 +109,9 @@ export default function Layout({ children }: LayoutProps) {
 
                 <div className="sidebar-footer">
                     <div className="rm-profile">
-                        <div className="rm-avatar">RM</div>
+                        <div className="rm-avatar">PO</div>
                         <div>
-                            <div className="rm-name">RM-SG-014</div>
+                            <div className="rm-name">Priscilla Ong</div>
                             <div className="rm-role">Relationship Manager</div>
                         </div>
                     </div>
