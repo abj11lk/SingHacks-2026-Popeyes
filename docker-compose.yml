@@ -1,13 +1,13 @@
 services:
   backend:
     build: .
+    ports:
+      - "8000:8000"
     volumes:
       # Bind-mount the repo over the image's copy so edits on the host are
-      # picked up immediately -- no rebuild, no restart once a --reload
-      # server (FastAPI/uvicorn) lands here.
+      # picked up immediately -- --reload restarts the server on save, no
+      # rebuild needed for code changes (only for dependency changes).
       - .:/workspace
     env_file:
       - .env
-    # Placeholder command until the FastAPI app exists. Swap for:
-    #   uvicorn backend.api:app --host 0.0.0.0 --port 8000 --reload
-    command: ["python", "check_tools.py"]
+    command: ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

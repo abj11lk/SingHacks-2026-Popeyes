@@ -27,6 +27,24 @@ from langchain_core.tools import tool
 from . import tools as t
 from .db import SNAPSHOT_DATES, TODAY
 
+
+def _safe(fn, *args, **kwargs):
+    """
+    Runs a tools.py function and turns any exception into an LLM-readable
+    error dict instead of letting it propagate. This matters because
+    LangGraph's ToolNode only catches its own internal ToolInvocationError
+    by default (malformed arguments) -- an application-level ValueError
+    (e.g. an invalid snapshot date, which the model *will* pass sometimes,
+    since event dates and snapshot dates aren't the same five values) would
+    otherwise crash the whole agent run instead of giving the model
+    something to retry with.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
 _SNAPSHOT_HELP = (
     f"\n\nValid snapshot dates are exactly: {', '.join(SNAPSHOT_DATES)}. "
     f"'{TODAY}' is 'today' in this dataset. Omit this argument to use today. "
@@ -149,7 +167,8 @@ def get_client_snapshot(client_id: str, as_of: Optional[str] = None) -> dict:
     Use this to understand who the client is and what they currently hold.
     Use diff_snapshots instead if the question is about what changed.
     """
-    return _condense_snapshot(t.get_client_snapshot(client_id, as_of))
+    result = _safe(t.get_client_snapshot, client_id, as_of)
+    return result if "error" in result else _condense_snapshot(result)
 
 
 @tool
@@ -170,7 +189,8 @@ def diff_snapshots(client_id: str, from_date: str, to_date: str) -> dict:
     guessing at causality yourself. from_date and to_date must both be
     exact snapshot dates and from_date must be earlier than to_date.
     """
-    return _condense_diff(t.diff_snapshots(client_id, from_date, to_date))
+    result = _safe(t.diff_snapshots, client_id, from_date, to_date)
+    return result if "error" in result else _condense_diff(result)
 
 
 @tool
@@ -186,7 +206,7 @@ def get_notes(client_id: str, as_of: Optional[str] = None) -> list:
     reconstructing what was known at a past point in time); omit it to see
     everything up to today.
     """
-    return t.get_notes(client_id, as_of)
+    return _safe(t.get_notes, client_id, as_of)
 
 
 @tool
@@ -203,7 +223,7 @@ def get_events(start_date: Optional[str] = None, end_date: Optional[str] = None,
     substring match against the event description, region and transmission
     channels (e.g. keyword='energy').
     """
-    return t.get_events(start_date, end_date, keyword)
+    return _safe(t.get_events, start_date, end_date, keyword)
 
 
 @tool
@@ -220,8 +240,14 @@ def get_market_context(from_date: Optional[str] = None, to_date: Optional[str] =
     GOLD_USD_OZ, BRENT_USD_BBL, VIX, SPX, HSI, and the USDxxx/EURUSD/GBPUSD
     FX pairs. Omit series_ids to get all of them; from_date/to_date default
     to the full available range if omitted.
+
+    Each series in the result has BOTH `change` (the raw unit move, e.g.
+    "+31.6" for a Brent move in USD/barrel -- NOT a percentage) and
+    `change_pct` (the percentage move, already computed -- use this one
+    whenever you write "X%", never divide `change` by anything yourself or
+    treat `change` as a percentage).
     """
-    return t.get_market_context(from_date, to_date, series_ids)
+    return _safe(t.get_market_context, from_date, to_date, series_ids)
 
 
 @tool
@@ -233,7 +259,7 @@ def check_mandate_breach(portfolio_id: str, as_of: Optional[str] = None) -> dict
     status='not_applicable' -- they are not managed by the bank and have no
     mandate to breach; do not describe a custody account as "in breach".
     """
-    return t.check_mandate_breach(portfolio_id, as_of)
+    return _safe(t.check_mandate_breach, portfolio_id, as_of)
 
 
 @tool
@@ -246,7 +272,7 @@ def get_liquidity_map(client_id: str, as_of: Optional[str] = None, horizon_days:
     alternative to selling. horizon_days sets the "near-term" window for
     cash needs, default 365.
     """
-    return t.get_liquidity_map(client_id, as_of, horizon_days)
+    return _safe(t.get_liquidity_map, client_id, as_of, horizon_days)
 
 
 @tool
@@ -258,7 +284,7 @@ def get_lookthrough_exposure(client_id: str, as_of: Optional[str] = None) -> dic
     company). This is a heuristic text match, not a confirmed issuer
     cross-reference -- present it as "worth checking", not as fact.
     """
-    return t.get_lookthrough_exposure(client_id, as_of)
+    return _safe(t.get_lookthrough_exposure, client_id, as_of)
 
 
 @tool
@@ -269,7 +295,7 @@ def list_clients(as_of: Optional[str] = None) -> list:
     90 days. Use this for book-wide/prioritisation questions, not for
     single-client detail.
     """
-    return t.list_clients(as_of)
+    return _safe(t.list_clients, as_of)
 
 
 ALL_TOOLS = [
@@ -285,6 +311,12 @@ ALL_TOOLS = [
 ]
 
 EXPLANATION_TOOLS = [get_client_snapshot, diff_snapshots, get_notes, get_events, get_market_context]
+
+# get_lookthrough_exposure resolves the FCN's worst-of basket to named
+# instruments/companies; get_notes carries the client's own stated view and
+# the RM's open question ("we have not modelled this"); get_market_context
+# grounds any Brent/shipping-rate claim in real numbers rather than a guess.
+SCENARIO_TOOLS = [get_client_snapshot, get_lookthrough_exposure, get_events, get_market_context, get_notes]
 
 # Append the snapshot-dates reminder to every tool that takes an as_of/date
 # argument, now that each is a real StructuredTool with a working .description.
