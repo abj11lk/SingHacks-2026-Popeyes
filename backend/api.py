@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import supabase_client, tools
+from .db import SNAPSHOT_DATES
 
 app = FastAPI(title="Wealth Intelligence API")
 
@@ -54,11 +55,38 @@ def get_client_workspace(client_id: str):
     except ValueError:
         raise HTTPException(status_code=404, detail=f"Unknown client_id: {client_id}")
 
+    mandate_breach_by_portfolio = {
+        p["portfolio_id"]: tools.check_mandate_breach(p["portfolio_id"])
+        for p in snapshot["portfolios"]
+    }
+
     return {
         "snapshot": snapshot,
         "liquidity": tools.get_liquidity_map(client_id),
         "lookthrough": tools.get_lookthrough_exposure(client_id),
+        "mandate_breach_by_portfolio": mandate_breach_by_portfolio,
     }
+
+
+@app.get("/api/clients/{client_id}/aum-trend")
+def get_aum_trend(client_id: str):
+    """
+    AUM at each of the five real snapshot dates -- for the AUM trend chart.
+    Five real points, not an interpolated/synthetic series; a client whose
+    portfolios didn't exist yet at an early snapshot date just shows 0 for
+    that point rather than the endpoint failing.
+    """
+    points = []
+    for as_of in SNAPSHOT_DATES:
+        try:
+            snapshot = tools.get_client_snapshot(client_id, as_of)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=f"Unknown client_id: {client_id}")
+        points.append({
+            "as_of": as_of,
+            "aum_usd": snapshot["aum_usd_from_holdings_all_portfolios"],
+        })
+    return {"client_id": client_id, "points": points}
 
 
 @app.get("/api/clients/{client_id}/agent-runs/{agent_type}")
