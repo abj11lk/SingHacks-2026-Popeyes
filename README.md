@@ -57,13 +57,13 @@ npm run dev
 # Book overview, all 20 clients
 curl http://localhost:8000/api/clients
 
-# Full tool-layer sweep across all 20 clients, every tool function
-docker compose run --rm backend python check_all_clients.py
+# One client's full workspace (profile, portfolios, liquidity, concentration)
+curl http://localhost:8000/api/clients/CL-0012
 
 # Run one agent for real against its focal client (spends real Groq tokens)
-docker compose run --rm backend python run_explanation_agent.py    # CL-0012
-docker compose run --rm backend python run_scenario_agent.py       # CL-0019
-docker compose run --rm backend python run_recommendation_agent.py # CL-0014
+curl -X POST http://localhost:8000/api/clients/CL-0012/agent-runs/explanation/generate    # CL-0012
+curl -X POST http://localhost:8000/api/clients/CL-0019/agent-runs/scenario/generate       # CL-0019
+curl -X POST http://localhost:8000/api/clients/CL-0014/agent-runs/recommendation/generate # CL-0014
 
 # Prioritisation is book-wide, not per-client -- the ranking itself is free
 # (zero Groq tokens); only the narrative briefing spends real tokens

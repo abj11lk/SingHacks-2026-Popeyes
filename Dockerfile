@@ -10,4 +10,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 # image runnable standalone (e.g. in CI) when nothing is mounted.
 COPY . .
 
-CMD ["python", "check_tools.py"]
+CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
