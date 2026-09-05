@@ -12,3 +12,11 @@ __pycache__/
 # misc
 .DS_Store
 *.db
+
+# local-only dev driver/check scripts -- not part of the app, kept for
+# ad-hoc local testing but deliberately not tracked in the repo
+check_all_clients.py
+check_tools.py
+run_explanation_agent.py
+run_scenario_agent.py
+run_recommendation_agent.py
