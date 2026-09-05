@@ -79,8 +79,8 @@ bet, three times. It then projects both directions — escalation and
 resolution — with real historical grounding, not guesses.
 
 **Scenario C — "What should I actually do about this client?"**
-Lau Chi Ming has ~53% of his portfolio in one property name across four
-wrappers, and a HKD 60m financing deadline his liquid assets can't cover.
+Lau Chi Ming has ~29% of his portfolio in one property name spread across
+three wrappers, and a HKD 60m financing deadline his liquid assets can't cover.
 Recommendation proposes three concrete actions — increase an underweight
 allocation, trim two positions breaching their concentration limit, draw a
 credit facility instead of forcing a sale. Priscilla accepts one, edits the

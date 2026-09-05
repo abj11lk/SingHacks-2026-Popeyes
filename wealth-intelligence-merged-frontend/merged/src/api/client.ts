@@ -3,6 +3,7 @@ import type {
     ClientWorkspace,
     Recommendation,
     AumTrend,
+    PrioritiesResponse,
 } from "../types";
 
 const API_BASE =
@@ -78,6 +79,14 @@ export async function getClients(): Promise<{
 
 export async function getAumTrend(clientId: string): Promise<AumTrend> {
     return request<AumTrend>(`/api/clients/${encodeURIComponent(clientId)}/aum-trend`);
+}
+
+// ============================================================
+// Prioritisation
+// ============================================================
+
+export async function getPriorities(): Promise<PrioritiesResponse> {
+    return request<PrioritiesResponse>("/api/priorities");
 }
 
 // ============================================================

@@ -2,9 +2,13 @@
 Recommendation Agent -- "here's what I'd consider doing, you decide."
 
 Built for CL-0014 (Lau Chi Ming): a Hong Kong property bet spread across
-four separate-looking wrappers (a perpetual bond, a common stock, an
-accumulator, and direct real estate -- ~53% of AUM combined per
-get_lookthrough_exposure), on top of a genuine liquidity mismatch (an
+three separate-looking wrappers of the same issuer -- a perpetual bond, a
+common stock, and an accumulator referencing it (~29% of AUM combined per
+get_lookthrough_exposure; an earlier version of this docstring said ~53%
+across four wrappers including "direct real estate" -- that number was
+inflated by a since-fixed clustering bug that had also merged in an
+unrelated bank's bond purely because both bonds share the word
+"perpetual"), on top of a genuine liquidity mismatch (an
 HKD 60m redevelopment contribution due mid-2027 against a portfolio where
 only ~43% is Daily-liquid). Both risks are already visible as plain data on
 the dashboard (the Concentration card, the Liquidity bar); this agent's job

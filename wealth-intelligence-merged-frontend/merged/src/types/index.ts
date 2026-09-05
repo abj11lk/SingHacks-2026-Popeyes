@@ -217,6 +217,35 @@ export interface AgentRun {
 }
 
 // ============================================================
+// Prioritisation ("twenty clients, one RM, who calls first")
+// ============================================================
+
+export interface PrioritySignal {
+    type: string;
+    title: string;
+    detail: string;
+    score: number;
+    portfolio_id?: string | null;
+    portfolio_name?: string | null;
+}
+
+export type PriorityLabel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "CLEAR";
+
+export interface PriorityRow {
+    client_id: string;
+    client_name: string;
+    aum_usd_from_holdings: number;
+    score: number;
+    priority: PriorityLabel;
+    signals: PrioritySignal[];
+}
+
+export interface PrioritiesResponse {
+    as_of: string;
+    book: PriorityRow[];
+}
+
+// ============================================================
 // Recommendations & Actions
 // ============================================================
 

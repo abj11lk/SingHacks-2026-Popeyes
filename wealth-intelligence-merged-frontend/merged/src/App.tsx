@@ -7,7 +7,7 @@ import {
 
 import Layout from "./components/Layout";
 
-import SelectClient from "./pages/SelectClient";
+import PrioritiesDashboard from "./pages/PrioritiesDashboard";
 import ClientIntelligence from "./pages/ClientIntelligence";
 
 
@@ -19,11 +19,11 @@ export default function App() {
 
                 <Routes>
 
-                    {/* Nothing selected yet -- pick a client from the sidebar */}
+                    {/* Book-wide "who calls first" priority dashboard */}
                     <Route
                         path="/"
                         element={
-                            <SelectClient />
+                            <PrioritiesDashboard />
                         }
                     />
 

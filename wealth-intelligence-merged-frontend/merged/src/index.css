@@ -1082,6 +1082,15 @@ p {
     color: #16805a;
 }
 
+.priority-clear {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.priority-clear::before {
+    display: none;
+}
+
 
 /* ================================================================
    AI PRIORITISATION BLOCK  (previously unstyled)

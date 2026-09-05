@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { Search, AlertTriangle } from "lucide-react";
+import { Search, AlertTriangle, LayoutDashboard } from "lucide-react";
 
 import { getClients } from "../api/client";
 import type { Client } from "../types";
@@ -43,6 +43,17 @@ export default function Layout({ children }: LayoutProps) {
                         <div className="brand-subtitle">RM Decision Support</div>
                     </div>
                 </Link>
+
+                <nav className="sidebar-nav" style={{ marginBottom: "14px" }}>
+                    <NavLink
+                        to="/"
+                        end
+                        className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+                    >
+                        <LayoutDashboard size={16} />
+                        <span>Dashboard</span>
+                    </NavLink>
+                </nav>
 
                 <div className="sidebar-search">
                     <Search size={15} />

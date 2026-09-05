@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import supabase_client, tools
-from .db import SNAPSHOT_DATES
+from .db import SNAPSHOT_DATES, TODAY
 
 app = FastAPI(title="Wealth Intelligence API")
 
@@ -87,6 +87,50 @@ def get_aum_trend(client_id: str):
             "aum_usd": snapshot["aum_usd_from_holdings_all_portfolios"],
         })
     return {"client_id": client_id, "points": points}
+
+
+@app.get("/api/priorities")
+def get_priorities():
+    """
+    Every client, ranked -- "twenty clients, one RM, who does she call
+    first." Pure Python (agents/prioritisation.py's deterministic signal/
+    score layer), zero Groq tokens, safe to run on every page load like the
+    other plain-data panels.
+    """
+    from .agents import prioritisation
+    return {"as_of": TODAY, "book": prioritisation.build_book_priorities()}
+
+
+@app.get("/api/priorities/agent-run")
+def get_latest_priorities_run():
+    """Most recent book-wide triage briefing, if one has been generated."""
+    runs = supabase_client.list_agent_runs(agent_type="prioritisation", limit=1)
+    if not runs:
+        return {"available": False}
+    run = runs[0]
+    return {
+        "available": True,
+        "output": run["output"],
+        "model": run["model"],
+        "created_at": run["created_at"],
+        "langsmith_trace_url": run["langsmith_trace_url"],
+    }
+
+
+@app.post("/api/priorities/agent-run/generate")
+def generate_priorities_run():
+    """Runs the Prioritisation Agent live and persists the result."""
+    from .agents import prioritisation
+
+    result = prioritisation.brief()
+    return {
+        "available": True,
+        "output": {"answer": result["answer"]},
+        "model": prioritisation.MODEL,
+        "created_at": None,
+        "langsmith_trace_url": result["langsmith_trace_url"],
+        "book": result["book"],
+    }
 
 
 @app.get("/api/clients/{client_id}/agent-runs/{agent_type}")

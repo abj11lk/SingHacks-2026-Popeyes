@@ -71,3 +71,13 @@ export async function generateAgentRun(
         );
     }
 }
+
+// Book-wide, not per-client -- the Prioritisation Agent's narrative
+// briefing on top of the already-ranked, already-scored client list.
+export function getPrioritiesRun(): Promise<AgentRun> {
+    return request<AgentRun>("/api/priorities/agent-run");
+}
+
+export function generatePrioritiesRun(): Promise<AgentRun> {
+    return request<AgentRun>("/api/priorities/agent-run/generate", { method: "POST" });
+}

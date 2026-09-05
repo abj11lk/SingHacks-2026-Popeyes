@@ -668,7 +668,22 @@ def get_liquidity_map(client_id: str, as_of: str | None = None, horizon_days: in
 # bonus: look-through / concentration helper
 # ---------------------------------------------------------------------------
 
-_STOPWORDS = {"ltd", "the", "of", "fund", "note", "ref", "and", "a", "an", "properties"}
+# Generic asset-class/product vocabulary that appears across many unrelated
+# instruments (an equity fund and a bond fund and a private credit fund are
+# not "the same theme" just because they share the word "fund" or "credit")
+# -- added after get_lookthrough_exposure was found chaining unrelated
+# holdings together this way (see tools_lookthrough fix notes). Genuine
+# issuer/company names (golden, harbour, helios, pacific, orient, shipping,
+# bara, nusantara) are deliberately NOT in this list -- those are exactly
+# the words that should keep linking a company's stock to a bond or note
+# that references it.
+_STOPWORDS = {
+    "ltd", "the", "of", "fund", "note", "ref", "and", "a", "an", "properties",
+    "equity", "global", "developed", "grade", "investment", "corporate",
+    "credit", "energy", "majors", "bond", "fixed", "income", "market",
+    "private", "short", "long", "index", "infrastructure", "inc", "corp",
+    "tbk", "kk", "ab", "pte", "plc",
+}
 
 
 def _significant_words(text: str) -> set:
@@ -719,8 +734,14 @@ def get_lookthrough_exposure(client_id: str, as_of: str | None = None) -> dict:
             "overlaps_source_of_wealth": bool(name_words & sow_words) or bool(underlying_words & sow_words),
         })
 
-    # union holdings whose name_words or underlying_words intersect -- naive
-    # clustering, fine at this scale (a handful of holdings per client).
+    # union holdings that share at least 2 significant words -- naive
+    # clustering, fine at this scale (a handful of holdings per client). A
+    # single shared word isn't enough evidence of the same issuer (e.g.
+    # "Pacific Rim Bank" and "Pacific Orient Shipping" share only "pacific"
+    # and are unrelated companies); two shared words reliably catches a
+    # company's stock/bond/note ("golden" + "harbour") without also
+    # catching same-asset-class coincidences.
+    MIN_SHARED_WORDS = 2
     clusters = []
     used = [False] * len(rows)
     for i, r in enumerate(rows):
@@ -736,7 +757,7 @@ def get_lookthrough_exposure(client_id: str, as_of: str | None = None) -> dict:
                 if used[j]:
                     continue
                 r2_tokens = set(r2["name_words"]) | set(r2["underlying_words"])
-                if tokens & r2_tokens:
+                if len(tokens & r2_tokens) >= MIN_SHARED_WORDS:
                     cluster.append(r2)
                     used[j] = True
                     tokens |= r2_tokens
